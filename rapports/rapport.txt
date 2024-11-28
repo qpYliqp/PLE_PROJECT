@@ -1,0 +1,3 @@
+Voici la liste des étapes à faire :
+    1 - Faire un data cleaning
+    Mêmes parties enregistrées à quelques secondes de différences : vérifier à 10s d'écart.
