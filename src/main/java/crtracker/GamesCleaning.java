@@ -1,3 +1,7 @@
+package crtracker;
+import java.io.IOException;
+import java.time.Instant;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
@@ -13,97 +17,154 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+
+import java.util.*;
 public class GamesCleaning extends Configured implements Tool {
 
-    // Mapper class to read the input and process the JSON data
-    public static class GamesCleaningMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+    
+   
+
+	
+    public static class GamesCleaningMapper extends Mapper<LongWritable, Text, Text, Text> {
+
         
-        private static final ObjectMapper objectMapper = new ObjectMapper();
         
+        // Méthode pour convertir une date ISO 8601 en timestamp (millisecondes)
+      
+    
+        private Map<String, Long> lastTimestampMap = new HashMap<>();
+
+        @Override
         public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-            // Parse the JSON input
-            String jsonString = value.toString();
-            if (validJson(jsonString)) {
-                // Validate the decks to have exactly 8 cards
-                if (checkDeckSize(jsonString)) {
-                    context.write(new Text("Valid Game"), new IntWritable(1));
-                } else {
-                    context.write(new Text("Invalid Deck Size"), new IntWritable(1));
-                }
-            } else {
-                context.write(new Text("Invalid JSON"), new IntWritable(1));
-            }
-        }
-
-        // Validate if the JSON string is correctly formatted
-        private boolean validJson(String jsonString) {
+            Gson gson = new Gson();
+            String jsonLine = value.toString();
+            Battle battle;
+            
             try {
-                objectMapper.readTree(jsonString); // Try to parse the JSON
-                return true;
-            } catch (IOException e) {
-                return false;
+                battle = gson.fromJson(jsonLine, Battle.class);
+            } catch (Exception e) {
+                return; // Si le JSON est invalide, on l'ignore
+            }
+        
+            // Vérifie que la partie a exactement 2 joueurs
+            if (battle.players.size() != 2) return;
+        
+            String player1 = battle.players.get(0).utag;
+            String player2 = battle.players.get(1).utag;
+        
+            if (player1 == null || player2 == null) return;
+        
+            // Tri des joueurs pour garantir l'unicité
+            String first = player1.compareTo(player2) <= 0 ? player1 : player2;
+            String second = player1.compareTo(player2) > 0 ? player1 : player2;
+        
+            // Crée une clé unique en incluant la date
+            String uniqueKey = first + "," + second + "," + battle.mode + "," + battle.game + "," + battle.type;
+        
+           
+        
+          
+            context.write(new Text(uniqueKey), new Text(jsonLine));
+        }
+    }
+
+
+   
+
+
+    public static class GamesCleaningReducer extends Reducer<Text, Text, Text, Text> {
+        private long convertDateToTimestamp(String date) {
+            try {
+                return java.time.Instant.parse(date).toEpochMilli();
+            } catch (Exception e) {
+                return -1;  // Si la date est invalide
             }
         }
 
-        // Check that both players' decks have exactly 8 cards
-        private boolean checkDeckSize(String jsonString) throws IOException {
-            // Deserialize the JSON string into a Java object
-            JsonNode rootNode = objectMapper.readTree(jsonString);
-            JsonNode players = rootNode.path("players");
-
-            for (JsonNode player : players) {
-                String deck = player.path("deck").asText();
-                if (deck.length() != 16) {  // Each deck should have 8 cards (2 characters per card)
-                    return false;
+        public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+            // Créer une liste pour stocker les parties avec la même clé unique
+            List<String> validBattles = new ArrayList<>();
+            
+            // Pour comparer les dates, on va d'abord convertir les dates en timestamps
+            List<Long> timestamps = new ArrayList<>();
+    
+            // On parcourt toutes les parties pour la clé unique donnée
+            for (Text value : values) {
+                String jsonLine = value.toString();
+                Gson gson = new Gson();
+                Battle battle;
+    
+                try {
+                    battle = gson.fromJson(jsonLine, Battle.class);
+                } catch (Exception e) {
+                    continue; // Si le JSON est invalide, on passe à la suivante
+                }
+    
+                // Convertir la date de la partie en timestamp
+                long timestamp = convertDateToTimestamp(battle.date);
+                timestamps.add(timestamp);
+                validBattles.add(jsonLine); // Ajouter la partie à la liste pour validation
+            }
+    
+            // Comparaison des timestamps pour détecter les parties proches (moins de 10 secondes d'écart)
+            List<String> validFinalBattles = new ArrayList<>(validBattles); // Nouvelle liste pour stocker les parties valides
+    
+            for (int i = 0; i < timestamps.size(); i++) {
+                long timestamp1 = timestamps.get(i);
+                for (int j = i + 1; j < timestamps.size(); j++) {
+                    long timestamp2 = timestamps.get(j);
+                    
+                    // Si la différence est inférieure à 10 secondes (10 000 ms), on ignore ces deux parties
+                    if (Math.abs(timestamp1 - timestamp2) <= 10000) {
+                        validFinalBattles.remove(i); // Retirer la partie à l'index i
+                        validFinalBattles.remove(j); // Retirer la partie à l'index j
+                        break;
+                    }
                 }
             }
-            return true;
-        }
-    }
-
-    // Reducer class to output the results after processing
-    public static class GamesCleaningReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
-        public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-            int sum = 0;
-            for (IntWritable val : values) {
-                sum += val.get();
+    
+            // Si des parties valides restent, on les écrit dans le contexte
+            for (String battle : validFinalBattles) {
+                context.write(key, new Text(battle));
             }
-            context.write(key, new IntWritable(sum));
         }
     }
+    
+        
 
-    @Override
-    public int run(String[] args) throws Exception {
+    
+
+
+
+    public int run(String args[]) throws IOException, ClassNotFoundException, InterruptedException {
         Configuration conf = getConf();
-        Job job = Job.getInstance(conf, "Clean Population");
+        Job job = Job.getInstance(conf, "Clean population");
         job.setJarByClass(GamesCleaning.class);
-
-        // Set input and output formats
         job.setOutputKeyClass(Text.class);
-        job.setOutputValueClass(IntWritable.class);
+        job.setOutputValueClass(Text.class);
         job.setOutputFormatClass(TextOutputFormat.class);
         job.setInputFormatClass(TextInputFormat.class);
-
-        // Set input and output paths
         try {
             FileInputFormat.addInputPath(job, new Path(args[0]));
             FileOutputFormat.setOutputPath(job, new Path(args[1]));
-        } catch (Exception e) {
-            System.out.println("Bad arguments, waiting for 2 arguments [inputURI] [outputURI]");
+        } 
+        catch (Exception e) {
+            System.out.println(" bad arguments, waiting for 2 arguments [inputURI] [outputURI]");
             return -1;
         }
-
-        // Set mapper and reducer classes
+    
         job.setMapperClass(GamesCleaningMapper.class);
         job.setReducerClass(GamesCleaningReducer.class);
-
         return job.waitForCompletion(true) ? 0 : 1;
     }
-
-    public static void main(String[] args) throws Exception {
+    
+    public static void main(String args[]) throws Exception {
         System.exit(ToolRunner.run(new GamesCleaning(), args));
     }
-}
+        
+    }
