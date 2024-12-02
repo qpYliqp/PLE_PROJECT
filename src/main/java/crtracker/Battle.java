@@ -87,26 +87,61 @@ class Battle implements Serializable{
 }
 
 
-class Game implements Writable, Cloneable
+class BattleKey implements Writable, Cloneable
 {
 
+	public String date;
+	public String game;
+	public String mode;
+	public int round;
+	public String type;
+	public String player1_utag;
+    public String player2_utag;
 
 
 
-	public void write(DataOutput out) throws IOException {
+	@Override
+    public void write(DataOutput out) throws IOException {
+        out.writeUTF(date);
+        out.writeUTF(game);
+        out.writeUTF(mode);
+        out.writeInt(round);
+        out.writeUTF(type);
+        out.writeUTF(player1_utag);
+        out.writeUTF(player2_utag);
 
-	}
+    
+    }
 
 
 	
-	public void readFields(DataInput in) throws IOException {
-
-	}
+	@Override
+    public void readFields(DataInput in) throws IOException {
+        date = in.readUTF();
+        game = in.readUTF();
+        mode = in.readUTF();
+        round = in.readInt();
+        type = in.readUTF();
+        player1_utag = in.readUTF();
+        player2_utag = in.readUTF();
+    }
 
 
 	
-	public String toString() {
-
-	}
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Game{");
+        sb.append("date='").append(date).append('\'');
+        sb.append(", game='").append(game).append('\'');
+        sb.append(", mode='").append(mode).append('\'');
+        sb.append(", round=").append(round);
+        sb.append(", type='").append(type).append('\'');
+        sb.append(", players=[");
+        sb.append(player1_utag).append(", ");
+        sb.append(player2_utag).append(", ");
+        sb.append("]}");
+        return sb.toString();
+    }
 
 }
