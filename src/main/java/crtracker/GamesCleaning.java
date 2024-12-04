@@ -32,6 +32,12 @@ public class GamesCleaning extends Configured implements Tool {
 	
     public static class GamesCleaningMapper extends Mapper<LongWritable, Text, Text, Text> {
 
+        
+        
+        
+        // Méthode pour convertir une date ISO 8601 en timestamp (millisecondes)
+         
+    
         private long convertDateToTimestamp(String date) {
             try {
                 // Parse la date en Instant
@@ -46,12 +52,7 @@ public class GamesCleaning extends Configured implements Tool {
                 return -1;  // Si la date est invalide, retourner -1
             }
         }
-        
-        
-        // Méthode pour convertir une date ISO 8601 en timestamp (millisecondes)
-         
-    
-         private HashSet<String>  doublons = new HashSet<>();
+
 
         @Override
         public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
@@ -87,9 +88,7 @@ public class GamesCleaning extends Configured implements Tool {
          
             String uniqueKey1 = first + "," + second + "," + battle.mode + "," + battle.game + "," + battle.type + "," +  convertDateToTimestamp(battle.date)  ;
 
-            if (!doublons.add(uniqueKey1)) {
-                return;
-            }
+          
             context.write(new Text(uniqueKey1), new Text(jsonLine));
         }
     }
@@ -99,19 +98,62 @@ public class GamesCleaning extends Configured implements Tool {
 
 
     public static class GamesCleaningReducer extends Reducer<Text, Text, Text, Text> {
-        // Méthode pour convertir une date ISO 8601 en timestamp (en millisecondes)
-       
-    
-        public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
-         
+        private HashSet<String> doublonsGlobal = new HashSet<>();
 
-            context.write(key, values.iterator().next());
-         
+        private String convertDateToTimestamp(String date) {
+            try {
+                // Parse la date en Instant
+                java.time.Instant instant = java.time.Instant.parse(date);
+                
+                // Truncate to the second, removing any fractional seconds
+                instant = instant.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+                
+                // Retourner le timestamp en millisecondes (arrondi à la seconde près)
+                return String.valueOf(instant.toEpochMilli());
+            } catch (Exception e) {
+                return null;  // Si la date est invalide, retourner null
+            }
+        }
+        
+    
+        @Override
+        public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+            Gson gson = new Gson();
+        
+            for (Text value : values) {
+                String jsonLine = value.toString(); // Lire chaque ligne JSON
+                Battle battle;
+        
+                try {
+                    // Convertir la ligne JSON en objet Battle
+                    battle = gson.fromJson(jsonLine, Battle.class);
+                } catch (Exception e) {
+                    continue; // Ignorer les lignes invalides
+                }
+        
+                // Modifier la date en arrondissant à la seconde près
+                String updatedDate = convertDateToTimestamp(battle.date);
+                if (updatedDate == null) {
+                    continue; // Ignorer les entrées avec des dates invalides
+                }
+                String updatedJsonLine = gson.toJson(battle);
+                if(!doublonsGlobal.add(updatedJsonLine)){
+                    continue;
+                }
+                battle.date = updatedDate;
+        
+                // Reconvertir l'objet Battle en JSON pour l'écrire dans le contexte
+              
+                context.write(key, new Text(updatedJsonLine));
+            }
+        }
+        
     }
     
+
         
 
-}
+
 
 
 
