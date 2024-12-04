@@ -28,16 +28,30 @@ public class GamesCleaning extends Configured implements Tool {
 
     
    
-
+   
 	
     public static class GamesCleaningMapper extends Mapper<LongWritable, Text, Text, Text> {
 
+        private long convertDateToTimestamp(String date) {
+            try {
+                // Parse la date en Instant
+                java.time.Instant instant = java.time.Instant.parse(date);
+                
+                // Truncate to the second, removing any fractional seconds
+                instant = instant.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+                
+                // Retourner le timestamp en millisecondes (arrondi à la seconde près)
+                return instant.toEpochMilli();
+            } catch (Exception e) {
+                return -1;  // Si la date est invalide, retourner -1
+            }
+        }
         
         
         // Méthode pour convertir une date ISO 8601 en timestamp (millisecondes)
-      
+         
     
-        private Map<String, Long> lastTimestampMap = new HashMap<>();
+         private HashSet<String>  doublons = new HashSet<>();
 
         @Override
         public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
@@ -53,9 +67,15 @@ public class GamesCleaning extends Configured implements Tool {
         
             // Vérifie que la partie a exactement 2 joueurs
             if (battle.players.size() != 2) return;
+
         
             String player1 = battle.players.get(0).utag;
             String player2 = battle.players.get(1).utag;
+
+
+           if (battle.players.get(0).deck.length()!=16 ||  battle.players.get(1).deck.length () !=16   ){
+               return;
+           }
         
             if (player1 == null || player2 == null) return;
         
@@ -64,12 +84,13 @@ public class GamesCleaning extends Configured implements Tool {
             String second = player1.compareTo(player2) > 0 ? player1 : player2;
         
             // Crée une clé unique en incluant la date
-            String uniqueKey = first + "," + second + "," + battle.mode + "," + battle.game + "," + battle.type;
-        
-           
-        
-          
-            context.write(new Text(uniqueKey), new Text(jsonLine));
+         
+            String uniqueKey1 = first + "," + second + "," + battle.mode + "," + battle.game + "," + battle.type + "," +  convertDateToTimestamp(battle.date)  ;
+
+            if (!doublons.add(uniqueKey1)) {
+                return;
+            }
+            context.write(new Text(uniqueKey1), new Text(jsonLine));
         }
     }
 
@@ -78,66 +99,19 @@ public class GamesCleaning extends Configured implements Tool {
 
 
     public static class GamesCleaningReducer extends Reducer<Text, Text, Text, Text> {
-        private long convertDateToTimestamp(String date) {
-            try {
-                return java.time.Instant.parse(date).toEpochMilli();
-            } catch (Exception e) {
-                return -1;  // Si la date est invalide
-            }
-        }
-
+        // Méthode pour convertir une date ISO 8601 en timestamp (en millisecondes)
+       
+    
         public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
-            // Créer une liste pour stocker les parties avec la même clé unique
-            List<String> validBattles = new ArrayList<>();
-            
-            // Pour comparer les dates, on va d'abord convertir les dates en timestamps
-            List<Long> timestamps = new ArrayList<>();
-    
-            // On parcourt toutes les parties pour la clé unique donnée
-            for (Text value : values) {
-                String jsonLine = value.toString();
-                Gson gson = new Gson();
-                Battle battle;
-    
-                try {
-                    battle = gson.fromJson(jsonLine, Battle.class);
-                } catch (Exception e) {
-                    continue; // Si le JSON est invalide, on passe à la suivante
-                }
-    
-                // Convertir la date de la partie en timestamp
-                long timestamp = convertDateToTimestamp(battle.date);
-                timestamps.add(timestamp);
-                validBattles.add(jsonLine); // Ajouter la partie à la liste pour validation
-            }
-    
-            // Comparaison des timestamps pour détecter les parties proches (moins de 10 secondes d'écart)
-            List<String> validFinalBattles = new ArrayList<>(validBattles); // Nouvelle liste pour stocker les parties valides
-    
-            for (int i = 0; i < timestamps.size(); i++) {
-                long timestamp1 = timestamps.get(i);
-                for (int j = i + 1; j < timestamps.size(); j++) {
-                    long timestamp2 = timestamps.get(j);
-                    
-                    // Si la différence est inférieure à 10 secondes (10 000 ms), on ignore ces deux parties
-                    if (Math.abs(timestamp1 - timestamp2) <= 10000) {
-                        validFinalBattles.remove(i); // Retirer la partie à l'index i
-                        validFinalBattles.remove(j); // Retirer la partie à l'index j
-                        break;
-                    }
-                }
-            }
-    
-            // Si des parties valides restent, on les écrit dans le contexte
-            for (String battle : validFinalBattles) {
-                context.write(key, new Text(battle));
-            }
-        }
+         
+
+            context.write(key, values.iterator().next());
+         
     }
     
         
 
-    
+}
 
 
 
