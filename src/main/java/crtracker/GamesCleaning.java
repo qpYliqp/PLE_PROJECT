@@ -33,16 +33,11 @@ import scala.collection.Iterator;
 
 public class GamesCleaning extends Configured implements Tool {
 
-    
-
-
 	public static class GamesCleaningMapper	extends Mapper<LongWritable, Text, GameKey, Text> {
 		public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
             Gson gson = new Gson();
             String jsonLine = value.toString();
-
             Battle battle;
-
             try
             {
                 battle = gson.fromJson(jsonLine, Battle.class);
@@ -50,28 +45,30 @@ public class GamesCleaning extends Configured implements Tool {
             {
                 return;
             }
-
             if(!battle.verifyData())
             {
                 return;
             }
-
-
             GameKey gameKey = new GameKey(battle);
             context.write(gameKey, new Text(jsonLine));
-
-			
+	
 		}
 	}
 
     public static class GamesCleaningReducer extends Reducer<GameKey,Text,Text,Text> {
-		public void reduce(Text key, Iterable<Text> values,Context context) throws IOException, InterruptedException {
+		public void reduce(GameKey key, Iterable<Text> values,Context context) throws IOException, InterruptedException {
 
-            Iterator<Text> iterator = (Iterator<Text>) values.iterator();
-            if (iterator.hasNext()) {
-                Text firstValue = iterator.next();
+            Text firstValue = null;
+            for (Text value : values) {
+                firstValue = value;
+                break; 
+            }
+    
+            // Si on a trouvé une première valeur, on l'écrit dans le context
+            if (firstValue != null) {
                 context.write(new Text("svp tuez moi :D"), firstValue);
             }
+            
           
            }
 	}
