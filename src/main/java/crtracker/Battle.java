@@ -4,9 +4,12 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.Serializable;
+import java.sql.Array;
+import java.time.Instant;
 import java.util.ArrayList;
 
 import org.apache.hadoop.io.Writable;
+import org.apache.hadoop.io.WritableComparable;
 import org.codehaus.jackson.annotate.JsonProperty;
 /*
 {"date":"2024-09-13T07:27:05Z","game":"gdc","mode":"Rage_Ladder","round":0,"type":"riverRacePvP",
@@ -54,6 +57,22 @@ class Player implements Serializable{
 	public int touch;
 	@JsonProperty("score")
 	public int score;
+
+    public boolean verifyData()
+    {
+        // Vérification des champs String : ils ne doivent pas être null ou vides
+        if (utag == null || utag.isEmpty() ||
+        ctag == null || ctag.isEmpty() ||
+        deck == null || deck.isEmpty() ||
+        deck.length() != 16
+        // evo == null || evo.isEmpty() ||
+        // tower == null || tower.isEmpty()
+        ) return false;
+
+
+        // Si toutes les vérifications passent
+        return true;
+    }
 }
 class WarClan implements Serializable{
 	@JsonProperty("day")
@@ -84,64 +103,119 @@ class Battle implements Serializable{
 	@JsonProperty("warclan")
 	WarClan warclan;
 
+    public boolean verifyData()
+    {
+    
+        boolean b = true;
+        if(players.size() == 2)
+        {
+            for(Player p : players)
+            {
+                if(!p.verifyData())
+                {
+                    b = false;
+                }
+            }
+        }
+        else
+        {
+            b = false;
+        }
+        if(
+            date == null || date.isEmpty() 
+            // game == null || game.isEmpty() ||
+            // mode == null || game.isEmpty() ||
+            // type == null || type.isEmpty()
+        ) b = false;
+        
+
+        return b;
+
+       
+
+      
+    }
+
 }
 
 
-class BattleKey implements Writable, Cloneable
-{
+class GameKey implements WritableComparable<GameKey>, Cloneable {
 
-	public String date;
-	public String game;
-	public String mode;
-	public int round;
-	public String type;
-	public String player1_utag;
-    public String player2_utag;
+    public String jsonLine;
+    public long date;
+    public String game;
+    public String mode;
+    public int round;
+    public String type;
+    public String player1;
+    public String player2;
 
+    public GameKey() {
+        this.date = 0;
+        this.game = "";
+        this.mode = "";
+        this.round = 0;
+        this.type = "";
+        this.player1 = "";
+        this.player2 = "";
+    }
 
+    public GameKey(Battle b) {
+        this.date = Instant.parse(b.date).getEpochSecond();
+        this.game = b.game;
+        this.mode = b.mode;
+        this.type = b.type;
+        this.player1 = b.players.get(0).utag;
+        this.player2 = b.players.get(1).utag;
+    }
 
-	@Override
+    @Override
     public void write(DataOutput out) throws IOException {
-        out.writeUTF(date);
+        out.writeLong(date);
         out.writeUTF(game);
         out.writeUTF(mode);
         out.writeInt(round);
         out.writeUTF(type);
-        out.writeUTF(player1_utag);
-        out.writeUTF(player2_utag);
-
-    
+        out.writeUTF(player1);
+        out.writeUTF(player2);
     }
 
-
-	
-	@Override
+    @Override
     public void readFields(DataInput in) throws IOException {
-        date = in.readUTF();
-        game = in.readUTF();
-        mode = in.readUTF();
-        round = in.readInt();
-        type = in.readUTF();
-        player1_utag = in.readUTF();
-        player2_utag = in.readUTF();
+        this.date = in.readLong();
+        this.game = in.readUTF();
+        this.mode = in.readUTF();
+        this.round = in.readInt();
+        this.type = in.readUTF();
+        this.player1 = in.readUTF();
+        this.player2 = in.readUTF();
     }
 
-
-	
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Game{");
-        sb.append("date='").append(date).append('\'');
-        sb.append(", game='").append(game).append('\'');
-        sb.append(", mode='").append(mode).append('\'');
-        sb.append(", round=").append(round);
-        sb.append(", type='").append(type).append('\'');
-        sb.append(", players=[");
-        sb.append(player1_utag).append(", ");
-        sb.append(player2_utag).append(", ");
-        sb.append("]}");
-        return sb.toString();
+        // Trier les joueurs dans l'ordre lexicographique pour garantir la cohérence
+        String thisPlayer1 = this.player1.compareTo(this.player2) <= 0 ? this.player1 : this.player2;
+        String thisPlayer2 = this.player1.compareTo(this.player2) > 0 ? this.player1 : this.player2;
+        // Créer une clé composite sans la date
+        return this.game + "|" + this.mode + "|" + this.round + "|" + this.type + "|" + thisPlayer1 + "|" + thisPlayer2;
     }
 
+
+    @Override
+    public int compareTo(GameKey o) {
+
+        // Comparer d'abord les clés composites
+        int keyComparison = this.toString().compareTo(o.toString());
+        if (keyComparison != 0) {
+            return keyComparison; // Si les clés sont différentes, retournez le résultat
+        }
+    
+        // Si les clés composites sont identiques, comparer les dates avec une tolérance de 10 secondes
+        if (Math.abs(this.date - o.date) <= 10) {
+            return 0; // Regrouper les parties avec des dates proches si toutes les autres infos sont identiques
+        }
+    
+        // Sinon, comparer les dates normalement
+        return Long.compare(this.date, o.date);
+    }
 }
